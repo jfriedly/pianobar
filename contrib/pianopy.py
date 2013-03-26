@@ -1,56 +1,83 @@
 #!/usr/bin/python
+"""
+Pianopy - Temporarily blacklist songs from headless_pianobar by running pianopy
+
+Pianopy takes an argument, which should be a file that looks like this::
+
+    |>  "Step One Two" by "Kaskade" on "Strobelight Seduction"
+    |>  "Club Sound" by "David Kane" on "Live At Pacha Club Ibiza"
+    ...
+
+Then Pianopy silently watches your headless_pianobar for each of the songs in
+this list and will skip them when they come up.
+To build the list, simply copy/paste songs from pianobar's output into it.
+
+Note:  Don't copy-paste in the heart characters that appear at the end of
+lines on songs you love.
+"""
+
+
+import os
 import time
-import sys
-import subprocess
-import logging
 import re
+import sys
 
 
-LOGLEVEL = logging.DEBUG
+def next_song(home):
+    """Plays the next song.
+    """
+    print "Song contains lyrics, skipping"
+    with open("{0}/.config/pianobar/ctl".format(home), 'w') as ctl:
+        ctl.write('n')
 
 
-def process_input(regex):
-    while True:
-        # Need to strip off '\x1b[2K' -- the 4-byte string that clears the
-        # current terminal line
-        instring = raw_input()
-        instring = regex.sub('', instring)
-        logging.debug('instring = ')
-        logging.debug(repr(instring))
-        if instring.startswith('Welcome to pianobar'):
-            logging.debug('welcome statement')
-            logging.info(instring)
-        elif instring.startswith('(i)'):
-            logging.debug('started with (i)')
-            logging.info(instring)
-        elif instring.startswith('|>  Station'):
-            logging.debug('started with |>  Station')
-            logging.info(instring)
-        elif instring.startswith('#'):
-            logging.debug('started with #')
-            logging.info(instring)
-        else:
-            logging.debug('else')
-            logging.info(instring)
-            time.sleep(5)
-            break
+def lyrical(songname):
+    """Returns True if a song is on the lyrical songs list, else False.
+    """
+    # This makes us open and close the file pretty often, but there's no
+    # other good way to ensure the file gets closed at the end.
+    with open(sys.argv[1], 'r') as lyrical_songs:
+        print songname
+        # Strip hearts and add newlines
+        if songname.rstrip(' <3') + '\n' in lyrical_songs.xreadlines():
+            return True
+        return False
+
+
+def _check_args(headless_pianobar_outfile):
+    """Checks the arguments passed to pianopy for errors.
+    """
+    if not len(sys.argv) > 1 or not os.path.exists(sys.argv[1]):
+        print "Pianopy must be passed a file containing a list of banned songs"
+        sys.exit(1)
+    if not os.path.exists(headless_pianobar_outfile):
+        print ("Pianopy must be run based on a pianobar output file.  Run "
+               "headless_pianobar or redirect stdout to "
+               "~/.config/pianobar/out")
+        sys.exit(2)
 
 
 def main():
-    pianobar = subprocess.Popen('pianobar', stdin=subprocess.PIPE,
-                                stdout=subprocess.PIPE)
-    sys.stdin = pianobar.stdout
-    sys.stdout = pianobar.stdin
-    logging.basicConfig(format=None, level=LOGLEVEL)
-    # Have to concatenate two strings here because one is unicode and the other
-    # contains a regex special character
-    regex = re.compile('\x1b' + r'\[2K')
+    print "Welcome to pianopy.  Press Ctrl-C to exit."
+    home = os.environ['HOME']
+    regex = re.compile(r'\|>  ".*')
+    headless_pianobar_outfile = "{0}/.config/pianobar/out".format(home)
+    _check_args(headless_pianobar_outfile)
 
-    while True:
-        process_input(regex)
-        cmd = 'n'
-        print cmd
-        logging.info(cmd)
+    with open(headless_pianobar_outfile, 'r') as pianobar_output:
+        initial_output = pianobar_output.read().strip()
+        initial_song = regex.findall(initial_output)[-1]
+        if lyrical(initial_song):
+            next_song(home)
+
+        while True:
+            time.sleep(1)
+            updated = pianobar_output.read().strip()
+            songname = regex.search(updated)
+            if songname is None:
+                continue
+            elif lyrical(songname.group()):
+                next_song(home)
 
 
 if __name__ == "__main__":
